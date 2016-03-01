@@ -99,7 +99,19 @@ def filtered_columns():
     if filter_cols is None:
         return columns
     else:
-        return [x for x in columns if x.name in filter_cols]
+        #return [x for x in columns if x.name in filter_cols]
+        result = []
+        column_names = [col.name for col in columns]
+        for x in filter_cols:
+            col = None
+            for c in columns:
+                if c.name == x:
+                    col = c
+                    break
+            assert col is not None, "column '{}' does not exist it header columns".format(x)
+            result.append(col)
+        return result
+
 
 logging_enabled = False
 logfile = None
@@ -136,13 +148,13 @@ def main(stdscr):
         horiz_end = (PAGE_HSCROLL + 1) * PAGE_WIDTH
         line_num_width = 10
 
-        col_names = [x.name for x in cols]
+        #col_names = [x.name for x in cols]
         col_out = "{:>" + str(line_num_width) + "}"
         col_out = col_out.format("LineNum | ")
-        for i, c in enumerate(col_names):
-            width = columns[i].width
-            col_out += "{:" + str(width) + "}" + " | "
-            col_out = col_out.format(c)        
+        for col in cols:
+            width = str(col.width)
+            col_out += "{:" + width + "}" + " | "
+            col_out = col_out.format(col.name)        
         stdscr.addstr(base, 0, col_out[horiz_start:horiz_end])
 
         stdscr.hline(base + 1, 0, "-", PAGE_WIDTH)
@@ -150,8 +162,8 @@ def main(stdscr):
         for i in range(start, end):
             y = (base + i + 2) - start
             out = ("[{:>" + str(line_num_width - 2) + "}]").format(i)
-            for j, col in enumerate(cols):
-                width = columns[j].width
+            for col in cols:
+                width = col.width
                 if width == 0:
                     continue    
                 template = "{:" + str(width) + "}"
