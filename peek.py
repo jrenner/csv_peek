@@ -1,6 +1,9 @@
 """Curses app for viewing CSV files."""
 
 
+print("Importing libraries...")
+
+
 import argparse
 import csv
 import curses
@@ -8,7 +11,6 @@ from curses.textpad import Textbox
 from datetime import datetime
 import os
 import pandas as pd
-import sys
 
 
 def parse_args():
@@ -40,17 +42,32 @@ def peek(stdscr, input_file, delimiter, columns, page_width, page_lines, log_fil
     page_num = 0
     reader = pd.read_csv(input_file, encoding='utf-8', dtype=str, delimiter=delimiter, quoting=csv.QUOTE_NONE, na_filter=False, usecols=columns, chunksize=page_lines)
     page_buf = []
+    widths = dict()
+    page_lens = []
+    ordered_header = []
     while True:
         stdscr.clear()
         while len(page_buf) < page_num + 1:
             try:
-                next_page = next(reader)
+                page_len = 0
+                if not ordered_header:
+                    first_page = next(reader)
+                    ordered_header = list(first_page.columns)
+                    next_page = first_page.to_dict(orient='list')
+                else:
+                    next_page = next(reader).to_dict(orient='list')
+                for column in next_page:
+                    if not page_len:
+                        page_len = len(next_page[column])
+                    width = widths.get(column, len(column))
+                    widths[column] = max(*[len(value) for value in next_page[column]], width)
                 page_buf.append(next_page)
+                page_lens.append(page_len)
             except StopIteration:
                 page_num = len(page_buf) - 1
         page = page_buf[page_num]
         start = page_num * page_lines
-        end = start + min(page_lines, len(page))
+        end = start + min(page_lines, page_lens[page_num])
         base = 3
 
         stdscr.addstr(0, 0, "press 'q' to quit, scroll left/right: '[' and ']', up/down: ',' and '.', jump to page: 'p'")
@@ -63,19 +80,19 @@ def peek(stdscr, input_file, delimiter, columns, page_width, page_lines, log_fil
         #col_names = [x.name for x in cols]
         col_out = "{:>" + str(line_num_width) + "}"
         col_out = col_out.format("LineNum | ")
-        for col in page.columns:
-            width = str(max(len(col), page[col].str.len().max()))
+        for col in ordered_header:
+            width = str(widths[col])
             col_out += "{:" + width + "}" + " | "
             col_out = col_out.format(col)        
         stdscr.addstr(base, 0, col_out[horiz_start:horiz_end])
 
         stdscr.hline(base + 1, 0, "-", page_width)
         at_end_of_file = False
-        for i in range(len(page)):
+        for i in range(page_lens[page_num]):
             y = (base + i + 2)
             out = ("[{:>" + str(line_num_width - 2) + "}]").format(start + i)
-            for col in page.columns:
-                width = max(len(col), page[col].str.len().max())
+            for col in ordered_header:
+                width = widths[col]
                 template = "{:" + str(width) + "}"
                 #log("template: '{}'".format(template))
                 try:
