@@ -1,175 +1,85 @@
-#!/usr/bin/env python3
+"""Curses app for viewing CSV files."""
 
+
+import argparse
+import csv
 import curses
 from curses.textpad import Textbox
-import sys
+from datetime import datetime
 import os
-import time
-import argparse
-
-parser = argparse.ArgumentParser('CSV Peek')
-parser.add_argument('-f', '--file')
-parser.add_argument('-c', '--columns', nargs='+')
-parser.add_argument('-d', '--delimiter')
-
-args = parser.parse_args(sys.argv[2:])
-
-if args.delimiter:
-    SEP = args.delimiter
-else:
-    SEP = '|'
-
-if args.columns:
-    filter_cols = args.columns
-else:
-    filter_cols = None
-fpath = None
-if args.file:
-    fpath = args.file
-if fpath is None and len(sys.argv) >= 2:
-    fpath = sys.argv[1]
-if fpath is None:
-    raise Exception("filepath not supplied as argument")
-    
-
-PAGE_LINES = 30
-PAGE_NUM = 0
-PAGE_WIDTH = 80
-PAGE_HSCROLL = 0
-
-lines_read = 0
-
-assert os.path.exists(fpath)
-fin = open(fpath, 'r')
-
-# stdscr = curses.initscr()
-# curses.noecho()
-# curses.cbreak()
-# stdscr.keypad(1)
-
-# def terminate():
-    # curses.nocbreak()
-    # stdscr.keypad(0)
-    # curses.echo()
-    # curses.endwin()
-
-class Column():
-    def __init__(self, name):
-        self.name = name
-        self.items = {}
-        self.width = len(name)
-
-    def add_item(self, line_num, item):
-        item_width = len(item)
-        if item_width > self.width:
-            self.width = item_width
-        self.items[line_num] = item
+import pandas as pd
+import sys
 
 
-    def __str__(self):
-        return "{} -- {} items".format(self.name, len(self.items))
+def parse_args():
+    """Parse commandline arguments."""
+    parser = argparse.ArgumentParser('CSV Peek')
+    parser.add_argument('-f', '--input_file', required=True)
+    parser.add_argument('-c', '--columns', nargs='+')
+    parser.add_argument('-d', '--delimiter', default='|')
+    parser.add_argument('-l', '--log_file')
+    parser.add_argument('--page_width', type=int, default=80)
+    parser.add_argument('--page_lines', type=int, default=30)
+    return parser.parse_args()
 
 
-def read_columns():
-    fin.seek(0)
-    cols = []
-    header = fin.readline().strip().split(SEP)
-    for col_name in header:
-        col = Column(col_name)
-        cols.append(col)
-    return cols
-
-
-columns = read_columns()
-
-
-def read_up_to_line(n):
-    global lines_read
-    ct = 0
-    while lines_read < n:
-        ct += 1
-        line = fin.readline().strip().split(SEP)
-        for i, item in enumerate(line):
-            columns[i].add_item(lines_read, item)
-        lines_read += 1
-    log("read to {}, count: {}".format(n, ct))
-
-
-def filtered_columns():
-    if filter_cols is None:
-        return columns
-    else:
-        #return [x for x in columns if x.name in filter_cols]
-        result = []
-        column_names = [col.name for col in columns]
-        for x in filter_cols:
-            col = None
-            for c in columns:
-                if c.name == x:
-                    col = c
-                    break
-            assert col is not None, "column '{}' does not exist it header columns".format(x)
-            result.append(col)
-        return result
-
-
-logging_enabled = False
-logfile = None
-
-
-def log(x):
-    if not logging_enabled:
+def log(x, log_file=None):
+    if not log_file:
         return
-    global logfile
-    if logfile is None:
-        logfile = open("peek_log.txt", "w")
-    logfile.write("{}\n".format(x))
+    mode = 'a' if os.path.exists(log_file) else 'w'
+    with open(log_file, mode=mode) as log:
+        log.write("{}: {}\n".format(datetime.now(), x))
 
 
-def main(stdscr):
-    global PAGE_NUM, PAGE_HSCROLL, PAGW_WIDTH, PAGE_LINES
-    max_yx = stdscr.getmaxyx()
-    PAGE_LINES = max(5, max_yx[0] - 10)
-    PAGE_WIDTH = max(20, max_yx[1] - 20)
+def peek(stdscr, input_file, delimiter, columns, page_width, page_lines, log_file):
+    page_hscroll = 0
+    max_y, max_x = stdscr.getmaxyx()
+    page_lines = max(5, max_y - 10)
+    page_width = max(20, max_x - 20)
 
+    page_num = 0
+    reader = pd.read_csv(input_file, encoding='utf-8', dtype=str, delimiter=delimiter, quoting=csv.QUOTE_NONE, na_filter=False, usecols=columns, chunksize=page_lines)
+    page_buf = []
     while True:
         stdscr.clear()
-        start = PAGE_NUM * PAGE_LINES
-        end = (PAGE_NUM + 1) * PAGE_LINES
-        read_up_to_line(end)
-
+        while len(page_buf) < page_num + 1:
+            try:
+                next_page = next(reader)
+                page_buf.append(next_page)
+            except StopIteration:
+                page_num = len(page_buf) - 1
+        page = page_buf[page_num]
+        start = page_num * page_lines
+        end = start + min(page_lines, len(page))
         base = 3
-        cols = filtered_columns()
 
         stdscr.addstr(0, 0, "press 'q' to quit, scroll left/right: '[' and ']', up/down: ',' and '.', jump to page: 'p'")
-        stdscr.addstr(1, 0, "PAGE: {}, HSCROLL: {}, LINES: {} - {}".format(PAGE_NUM, PAGE_HSCROLL, start, end-1))
+        stdscr.addstr(1, 0, "PAGE: {}, HSCROLL: {}, LINES: {} - {}".format(page_num, page_hscroll, start, end-1))
 
-        horiz_start = PAGE_HSCROLL * PAGE_WIDTH
-        horiz_end = (PAGE_HSCROLL + 1) * PAGE_WIDTH
+        horiz_start = page_hscroll * page_width
+        horiz_end = (page_hscroll + 1) * page_width
         line_num_width = 10
 
         #col_names = [x.name for x in cols]
         col_out = "{:>" + str(line_num_width) + "}"
         col_out = col_out.format("LineNum | ")
-        for col in cols:
-            width = str(col.width)
+        for col in page.columns:
+            width = str(max(len(col), page[col].str.len().max()))
             col_out += "{:" + width + "}" + " | "
-            col_out = col_out.format(col.name)        
+            col_out = col_out.format(col)        
         stdscr.addstr(base, 0, col_out[horiz_start:horiz_end])
 
-        stdscr.hline(base + 1, 0, "-", PAGE_WIDTH)
+        stdscr.hline(base + 1, 0, "-", page_width)
         at_end_of_file = False
-        for i in range(start, end):
-            y = (base + i + 2) - start
-            out = ("[{:>" + str(line_num_width - 2) + "}]").format(i)
-            for col in cols:
-                width = col.width
-                if width == 0:
-                    continue    
+        for i in range(len(page)):
+            y = (base + i + 2)
+            out = ("[{:>" + str(line_num_width - 2) + "}]").format(start + i)
+            for col in page.columns:
+                width = max(len(col), page[col].str.len().max())
                 template = "{:" + str(width) + "}"
                 #log("template: '{}'".format(template))
                 try:
-                    addition = template.format(col.items[i]) + " | "
+                    addition = template.format(page[col][i]) + " | "
                 except KeyError:
                     at_end_of_file = True
                     break
@@ -183,22 +93,21 @@ def main(stdscr):
         stdscr.refresh()
         ch = stdscr.getkey()
         cl = ch.lower()
-        if cl == 'q': # QUTI
+        if cl == 'q': # QUIT
             break
         elif cl == '.': # page down
-            PAGE_NUM += 1
-        elif cl == ',' and PAGE_NUM > 0: # page up
-            PAGE_NUM -= 1
+            page_num += 1
+        elif cl == ',' and page_num > 0: # page up
+            page_num -= 1
         elif cl == ']': # page right
-            PAGE_HSCROLL += 1
-        elif cl == '[' and PAGE_HSCROLL > 0: # page left
-            PAGE_HSCROLL -= 1
+            page_hscroll += 1
+        elif cl == '[' and page_hscroll > 0: # page left
+            page_hscroll -= 1
         elif cl == 'p':
-            textbox(stdscr)
+            page_num = textbox(stdscr, page_num)
 
 
-def textbox(win):
-    global PAGE_NUM
+def textbox(win, page_num, log_file=None):
     win.clear()
     prompt = "page number (hit Ctrl-G after typing number):"
     win.addstr(4, 4, prompt)
@@ -206,26 +115,37 @@ def textbox(win):
     tbox.edit()
     raw_res = tbox.gather()
     res = raw_res.replace(prompt, '').strip()
-    log("raw_res: '{}', res: '{}'".format(raw_res, res))
-    new_page = convert_str_to_page_num(res)
+    log("raw_res: '{}', res: '{}'".format(raw_res, res), log_file)
+    new_page = convert_str_to_page_num(res, log_file)
     if new_page is not None:
-        old = PAGE_NUM
-        PAGE_NUM = new_page
-        log('PAGE_NUM, old: {}, new: {} ({})'.format(old, PAGE_NUM, new_page))
+        old = page_num
+        page_num = new_page
+        log('PAGE_NUM, old: {}, new: {} ({})'.format(old, page_num, new_page), log_file)
+    return page_num
 
 
-def convert_str_to_page_num(s):
+def convert_str_to_page_num(s, log_file):
     try:
         n = int(s)        
+        assert n >= 0, 'page_num less than 0'
+        return n
     except Exception as e:
-        log(e)
+        log(e, log_file)
         return None
-    if n < 0:
-        log("can't convert pagenum: {}".format(n))
-        return None
-    return n
 
+
+def main():
+    """Parse commandline arguments & call peek."""
+    args = parse_args()
+    kwargs = {'input_file': args.input_file,
+              'delimiter': args.delimiter,
+              'columns': args.columns,
+              'page_width': args.page_width,
+              'page_lines': args.page_lines,
+              'log_file': args.log_file}
+    curses.wrapper(peek, **kwargs)
 
 
 if __name__ == '__main__':
-    curses.wrapper(main)
+    main()
+
