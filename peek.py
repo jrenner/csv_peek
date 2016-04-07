@@ -31,7 +31,7 @@ def log(x, log_file=None):
         log.write("{}: {}\n".format(datetime.now(), x))
 
 
-def peek(stdscr, input_file, delimiter, columns, page_width, page_lines):
+def peek(stdscr, input_file, delimiter, columns, page_width, page_lines, log_file):
     page_hscroll = 0
     max_y, max_x = stdscr.getmaxyx()
     page_lines = max(5, max_y - 10)
@@ -141,7 +141,8 @@ def main():
               'delimiter': args.delimiter,
               'columns': args.columns,
               'page_width': args.page_width,
-              'page_lines': args.page_lines}
+              'page_lines': args.page_lines,
+              'log_file': args.log_file}
     curses.wrapper(peek, **kwargs)
 
 
