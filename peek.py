@@ -1,16 +1,11 @@
 """Curses app for viewing CSV files."""
 
 
-print("Importing libraries...")
-
-
 import argparse
-import csv
 import curses
 from curses.textpad import Textbox
 from datetime import datetime
 import os
-import pandas as pd
 
 
 def parse_args():
@@ -20,8 +15,6 @@ def parse_args():
     parser.add_argument('-c', '--columns', nargs='+')
     parser.add_argument('-d', '--delimiter', default='|')
     parser.add_argument('-l', '--log_file')
-    parser.add_argument('--page_width', type=int, default=80)
-    parser.add_argument('--page_lines', type=int, default=30)
     return parser.parse_args()
 
 
@@ -33,95 +26,115 @@ def log(x, log_file=None):
         log.write("{}: {}\n".format(datetime.now(), x))
 
 
-def peek(stdscr, input_file, delimiter, columns, page_width, page_lines, log_file):
+def detect_columns(input_file, delimiter):
+    with open(input_file, encoding='utf-8') as f:
+        return f.readline().strip().split(delimiter)
+
+
+def open_file(input_file):
+    with open(input_file, encoding='utf-8') as f:
+        yield f
+
+
+def process_page(page, delimiter, columns, widths):
+    processed_page = []
+    for line in page:
+       values = line.split(delimiter)
+       record = []
+       for column in sorted(columns, key=columns.get):
+           value = values[columns[column]]
+           record.append(value)
+           widths[column] = max(widths[column], len(value))
+       processed_page.append(record)
+    return processed_page
+
+
+def peek(stdscr, input_file, delimiter, columns, log_file):
+    base = 3
+    line_num_width = 10
     page_hscroll = 0
     max_y, max_x = stdscr.getmaxyx()
+    fin = open(input_file, encoding='utf-8')
     page_lines = max(5, max_y - 10)
     page_width = max(20, max_x - 20)
-
     page_num = 0
-    reader = pd.read_csv(input_file, encoding='utf-8', dtype=str, delimiter=delimiter, quoting=csv.QUOTE_NONE, na_filter=False, usecols=columns, chunksize=page_lines)
     page_buf = []
-    widths = dict()
-    page_lens = []
-    ordered_header = []
+    header = fin.readline().strip().split(delimiter)
+    if columns:
+        _header = columns
+        columns = dict((column, header.index(column)) for column in columns)
+        header = _header
+    else:
+        columns = dict(zip(header, list(range(len(header)))))
+    widths = dict((column, len(column)) for column in header)
+    total_line_width = sum(widths.values())
+    eof = False
     while True:
         stdscr.clear()
-        while len(page_buf) < page_num + 1:
-            try:
-                page_len = 0
-                if not ordered_header:
-                    first_page = next(reader)
-                    ordered_header = list(first_page.columns)
-                    next_page = first_page.to_dict(orient='list')
-                else:
-                    next_page = next(reader).to_dict(orient='list')
-                for column in next_page:
-                    if not page_len:
-                        page_len = len(next_page[column])
-                    width = widths.get(column, len(column))
-                    widths[column] = max(*[len(value) for value in next_page[column]], width)
+        while not eof and len(page_buf) <= page_num:
+            next_page = []
+            while not eof and len(next_page) < page_lines:
+                try:
+                    next_page.append(next(fin))
+                except StopIteration:
+                    eof = True
+            if next_page:
                 page_buf.append(next_page)
-                page_lens.append(page_len)
-            except StopIteration:
-                page_num = len(page_buf) - 1
+        if page_num >= len(page_buf):
+            page_num = len(page_buf) - 1
         page = page_buf[page_num]
+        if type(page[0]) is str:
+            page = process_page(page, delimiter, columns, widths)
+            page_buf[page_num] = page
+            total_line_width = max(total_line_width, sum(widths.values()) + base * (len(widths) - 1) + line_num_width)
+            max_hscroll = (total_line_width // (page_width - 1))
+        page_len = len(page)
         start = page_num * page_lines
-        end = start + min(page_lines, page_lens[page_num])
-        base = 3
+        end = start + min(page_lines, page_len)
 
         stdscr.addstr(0, 0, "press 'q' to quit, scroll left/right: '[' and ']', up/down: ',' and '.', jump to page: 'p'")
         stdscr.addstr(1, 0, "PAGE: {}, HSCROLL: {}, LINES: {} - {}".format(page_num, page_hscroll, start, end-1))
 
         horiz_start = page_hscroll * page_width
         horiz_end = (page_hscroll + 1) * page_width
-        line_num_width = 10
 
         #col_names = [x.name for x in cols]
         col_out = "{:>" + str(line_num_width) + "}"
         col_out = col_out.format("LineNum | ")
-        for col in ordered_header:
+        cells = []
+        for col in header:
             width = str(widths[col])
             col_out += "{:" + width + "}" + " | "
             col_out = col_out.format(col)        
+            cells.append("{:" + width + "}")
         stdscr.addstr(base, 0, col_out[horiz_start:horiz_end])
-
+        template = ' | '.join(cells) + ' |'
         stdscr.hline(base + 1, 0, "-", page_width)
         at_end_of_file = False
-        for i in range(page_lens[page_num]):
+        for i in range(page_len):
             y = (base + i + 2)
             out = ("[{:>" + str(line_num_width - 2) + "}]").format(start + i)
-            for col in ordered_header:
-                width = widths[col]
-                template = "{:" + str(width) + "}"
-                #log("template: '{}'".format(template))
-                try:
-                    addition = template.format(page[col][i]) + " | "
-                except KeyError:
-                    at_end_of_file = True
-                    break
-                #log("addition: '{}'".format(addition))
-                out += addition
-            if at_end_of_file:
-                break
-            out = out[horiz_start:horiz_end]
-            stdscr.addstr(y, 0, out)
+            #log("template: '{}'".format(template))
+            out += template.format(*page[i])
+            #log("addition: '{}'".format(addition))
+            stdscr.addstr(y, 0, out[horiz_start:horiz_end])
 
         stdscr.refresh()
         ch = stdscr.getkey()
         cl = ch.lower()
         if cl == 'q': # QUIT
+            fin.close()
             break
         elif cl == '.': # page down
             page_num += 1
-        elif cl == ',' and page_num > 0: # page up
-            page_num -= 1
+        elif cl == ',': # page up
+            page_num = max(page_num - 1, 0)
         elif cl == ']': # page right
-            page_hscroll += 1
+            page_hscroll = min(page_hscroll + 1, max_hscroll)
         elif cl == '[' and page_hscroll > 0: # page left
-            page_hscroll -= 1
+            page_hscroll = max(page_hscroll - 1, 0)
         elif cl == 'p':
-            page_num = textbox(stdscr, page_num)
+            page_num = textbox(stdscr, page_num, log_file)
 
 
 def textbox(win, page_num, log_file=None):
@@ -157,8 +170,6 @@ def main():
     kwargs = {'input_file': args.input_file,
               'delimiter': args.delimiter,
               'columns': args.columns,
-              'page_width': args.page_width,
-              'page_lines': args.page_lines,
               'log_file': args.log_file}
     curses.wrapper(peek, **kwargs)
 
