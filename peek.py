@@ -1,3 +1,5 @@
+#!/usr/bin/env pytnon3
+
 """Curses app for viewing CSV files."""
 
 
