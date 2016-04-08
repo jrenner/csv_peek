@@ -28,22 +28,12 @@ def log(x, log_file=None):
         log.write("{}: {}\n".format(datetime.now(), x))
 
 
-def detect_columns(input_file, delimiter):
-    with open(input_file, encoding='utf-8') as f:
-        return f.readline().strip().split(delimiter)
-
-
-def open_file(input_file):
-    with open(input_file, encoding='utf-8') as f:
-        yield f
-
-
-def process_page(page, delimiter, columns, widths):
+def process_page(page, delimiter, header, columns, widths):
     processed_page = []
     for line in page:
        values = line.split(delimiter)
        record = []
-       for column in sorted(columns, key=columns.get):
+       for column in header:
            value = values[columns[column]]
            record.append(value)
            widths[column] = max(widths[column], len(value))
@@ -86,7 +76,7 @@ def peek(stdscr, input_file, delimiter, columns, log_file):
             page_num = len(page_buf) - 1
         page = page_buf[page_num]
         if type(page[0]) is str:
-            page = process_page(page, delimiter, columns, widths)
+            page = process_page(page, delimiter, header, columns, widths)
             page_buf[page_num] = page
             total_line_width = max(total_line_width, sum(widths.values()) + base * (len(widths) - 1) + line_num_width)
             max_hscroll = (total_line_width // (page_width - 1))
@@ -112,7 +102,6 @@ def peek(stdscr, input_file, delimiter, columns, log_file):
         stdscr.addstr(base, 0, col_out[horiz_start:horiz_end])
         template = ' | '.join(cells) + ' |'
         stdscr.hline(base + 1, 0, "-", page_width)
-        at_end_of_file = False
         for i in range(page_len):
             y = (base + i + 2)
             out = ("[{:>" + str(line_num_width - 2) + "}]").format(start + i)
