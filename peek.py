@@ -26,16 +26,6 @@ def log(x, log_file=None):
         log.write("{}: {}\n".format(datetime.now(), x))
 
 
-def detect_columns(input_file, delimiter):
-    with open(input_file, encoding='utf-8') as f:
-        return f.readline().strip().split(delimiter)
-
-
-def open_file(input_file):
-    with open(input_file, encoding='utf-8') as f:
-        yield f
-
-
 def process_page(page, delimiter, columns, widths):
     processed_page = []
     for line in page:
