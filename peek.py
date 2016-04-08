@@ -1,4 +1,4 @@
-#!/usr/bin/env pytnon3
+#!/usr/bin/env python3
 
 """Curses app for viewing CSV files."""
 
