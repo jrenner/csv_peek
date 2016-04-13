@@ -104,7 +104,7 @@ def peek(stdscr, input_file, delimiter, columns, log_file):
         stdscr.hline(base + 1, 0, "-", page_width)
         for i in range(page_len):
             y = (base + i + 2)
-            out = ("[{:>" + str(line_num_width - 2) + "}]").format(start + i)
+            out = ("[{:>" + str(line_num_width - 3) + "}] ").format(start + i)
             #log("template: '{}'".format(template))
             out += template.format(*page[i])
             #log("addition: '{}'".format(addition))
