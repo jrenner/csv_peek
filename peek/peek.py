@@ -34,7 +34,7 @@ def process_page(page, delimiter, header, columns, widths):
        values = line.split(delimiter)
        record = []
        for column in header:
-           value = values[columns[column]]
+           value = values[columns[column]].replace('\n', '')
            record.append(value)
            widths[column] = max(widths[column], len(value))
        processed_page.append(record)
