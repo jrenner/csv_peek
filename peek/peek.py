@@ -34,7 +34,7 @@ def process_page(page, delimiter, quote_char, header, columns, widths):
     return processed_page
 
 
-def peek(stdscr, input_file, delimiter, quote_char, columns, log_file):
+def peek(stdscr, input_file, delimiter, quote_char, columns):
     base = 3
     line_num_width = 10
     page_hscroll = 0
@@ -111,9 +111,7 @@ def peek(stdscr, input_file, delimiter, quote_char, columns, log_file):
         for i in range(page_len):
             y = base + i + 2
             out = ("[{:>" + str(line_num_width - 3) + "}] ").format(start + i)
-            # log("template: '{}'".format(template))
             out += template.format(*page[i])
-            # log("addition: '{}'".format(addition))
             stdscr.addstr(y, 0, out[horiz_start:horiz_end])
 
         stdscr.refresh()
@@ -131,10 +129,10 @@ def peek(stdscr, input_file, delimiter, quote_char, columns, log_file):
         elif cl == "[" and page_hscroll > 0:  # page left
             page_hscroll = max(page_hscroll - 1, 0)
         elif cl == "p":
-            page_num = textbox(stdscr, page_num, log_file)
+            page_num = textbox(stdscr, page_num)
 
 
-def textbox(win, page_num, log_file=None):
+def textbox(win, page_num):
     win.clear()
     prompt = "page number (hit Ctrl-G after typing number):"
     win.addstr(4, 4, prompt)
@@ -142,22 +140,20 @@ def textbox(win, page_num, log_file=None):
     tbox.edit()
     raw_res = tbox.gather()
     res = raw_res.replace(prompt, "").strip()
-    log("raw_res: '{}', res: '{}'".format(raw_res, res), log_file)
-    new_page = convert_str_to_page_num(res, log_file)
+    new_page = convert_str_to_page_num(res)
     if new_page is not None:
         old = page_num
         page_num = new_page
-        log("PAGE_NUM, old: {}, new: {} ({})".format(old, page_num, new_page), log_file)
     return page_num
 
 
-def convert_str_to_page_num(s, log_file):
+def convert_str_to_page_num(s):
     try:
         n = int(s)
         assert n >= 0, "page_num less than 0"
         return n
     except Exception as e:
-        log(e, log_file)
+        print(e)
         return None
 
 
@@ -169,7 +165,6 @@ def main():
         "delimiter": args.delimiter,
         "quote_char": args.quote_char,
         "columns": args.columns,
-        "log_file": args.log_file,
     }
     curses.wrapper(peek, **kwargs)
 
